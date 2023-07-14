@@ -1,0 +1,152 @@
+---
+- name: Retrieve template id
+  vmware.vmware_rest.vcenter_vm_info:
+    filter_names:
+      - "{{ vmware_os_template }}"
+  register: template_vm_id
+
+- name: Check that template was found
+  assert:
+    that:
+      - template_vm_id.value[0].vm is defined
+    fail_msg: "'vmware_os_template': {{ vmware_os_template }} not found"
+    success_msg: "cloning from 'vmware_os_template': {{ vmware_os_template }}"
+
+- name: Compute VM hardware 
+  set_fact:
+    hardware: "{{ vmware_hardware[vm_size | default('lc1.small')]}}"
+
+- name: Create vCenter VM
+  vmware.vmware_rest.vcenter_vm:
+    state: clone
+    source: "{{ template_vm_id.value[0].vm }}" 
+    name: "{{ vmware_name }}"
+    nics:
+      - backing:
+        type: STANDARD_PORTGROUP
+        network: "{{ network_info.value[0].network }}"
+    placement: 
+      folder: "{{ folder_info.value[0].folder }}"
+      datastore: "{{  datastore_info.value[0].datastore  }}"
+  register: vm_output
+
+- name: Retrieve VM id
+  vmware.vmware_rest.vcenter_vm_info:
+    filter_names:
+      - "{{ vmware_name }}"
+  register: new_vm_id
+  until: new_vm_id.value | length > 0
+  retries: 9
+
+- name: Turn VM off if it's on
+  vmware.vmware_rest.vcenter_vm_power:
+    state: stop
+    vm: "{{ new_vm_id.value[0].vm }}"
+  when: 
+    - new_vm_id.value[0].power_state is defined
+    - new_vm_id.value[0].power_state == "POWERED_ON"
+
+- name: Set CPU hardware
+  vmware.vmware_rest.vcenter_vm_hardware_cpu:
+    vm: "{{ new_vm_id.value[0].vm }}"
+    count: "{{ hardware.num_cpus }}"
+    hot_add_enabled: true
+    cores_per_socket: 1
+
+- name: Set memory hardware 
+  vmware.vmware_rest.vcenter_vm_hardware_memory:
+    vm: "{{ new_vm_id.value[0].vm }}"
+    size_MiB: "{{ hardware.memory_mb }}"
+    hot_add_enabled: true
+
+- name: customize newly created VM (linux)
+  vmware.vmware_rest.vcenter_vm_guest_customization:
+    vm: "{{ new_vm_id.value[0].vm }}"
+    configuration_spec:
+      linux_config:
+        domain: "{{ vmware_domain }}"
+        hostname:
+          fixed_name: "{{ vmware_name }}"
+          type: FIXED
+    interfaces:
+    - adapter:
+        ipv4:
+          type: DHCP
+          gateways:
+          ip_address: 
+          prefix:
+    global_DNS_settings:
+      dns_suffix_list: []
+      dns_servers:
+      - "{{ vmware_dns_servers }}"
+  when: not windows | bool
+
+- name: customize newly created VM (windows)
+  retries: 9
+  delay: 4
+  register: result
+  until: result.failed == false
+  vmware.vmware_rest.vcenter_vm_guest_customization:
+    vm: "{{ new_vm_id.value[0].vm }}"
+    configuration_spec:
+      windows_config:
+        reboot: "REBOOT"
+        sysprep:
+          domain:
+            type: "domain"
+          gui_run_once_commands:
+            - "netsh advfirewall set allprofiles state off"
+          gui_unattended:
+            auto_logon: true
+            auto_logon_count: 1
+            password: "{{ lookup('env', 'WIN_PASSWORD') }}"
+            time_zone: 10 # MST
+          user_data:
+            computer_name:
+              fixed_name: "{{ vmware_name }}"
+              type: "FIXED"
+            full_name: "{{ lookup('env', 'WIN_USERNAME') }}"
+            organization: "{{ lookup('env', 'WIN_USERNAME') }}"
+            product_key: "{{ lookup('env', 'WIN_KEY') }}"
+    interfaces:
+    - adapter:
+        ipv4:
+          type: DHCP
+          gateways:
+          ip_address: 
+          prefix:
+    global_DNS_settings:
+      dns_suffix_list: []
+      dns_servers:
+      - "{{ vmware_dns_servers }}"
+  when: windows | bool
+
+- name: wait for VM to finish customizing
+  vmware.vmware_rest.vcenter_vm_power_info:
+    vm: "{{ new_vm_id.value[0].vm }}"
+  register: vm_power_info
+
+- name: Turn VM on
+  vmware.vmware_rest.vcenter_vm_power:
+    state: start
+    vm: "{{ new_vm_id.value[0].vm }}"
+
+- name: wait for power to be on
+  vmware.vmware_rest.vcenter_vm_power_info:
+    vm: "{{ new_vm_id.value[0].vm }}"
+  register: vm_power_info
+
+- name: Retrieve VM info
+  vmware.vmware_rest.vcenter_vm_info:
+    vm: "{{ new_vm_id.value[0].vm }}"
+  register: new_vm_output
+
+- name: Set stats for output and variables we affect
+  ansible.builtin.set_stats:
+    data:
+      vmware_inst: "{{ new_vm_output.value.identity }}"
+      vmware_hardware: "{{ vmware_hardware }}"
+      vmware_os_template: "{{ vmware_os_template }}" 
+      vmware_domain: "{{ vmware_domain }}"
+      vmware_name: "{{ vmware_name }}"
+      expose_to_cloud_redhat_com_vfqdn: "{{ vmware_name }}.{{ vmware_domain }}"

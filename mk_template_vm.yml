@@ -1,0 +1,190 @@
+---
+- name: make new template
+  hosts: localhost
+  vars:
+    ansible_connection: local
+    vmware_domain: "lab.cheeseburgia.com"
+    windows: false
+  gather_facts: true # needed for date time
+  tasks:
+
+    - name: Retrieve VM id
+      vmware.vmware_rest.vcenter_vm_info:
+      register: template_vm_id
+
+    - name: figure out latest template
+      set_fact:
+        vmware_os_template: "{{ template_vm_id.value | map(attribute='name') | list | select('search', '^rhel8')| list | sort | last }}"
+
+    - name: Gather cluster info
+      set_fact:
+        # try to round to nearest day
+        vmware_name: "rhel8-{{ ansible_date_time.year }}{{ ansible_date_time.month }}{{ ansible_date_time.day}}"
+
+    - name: Gather cluster info
+      vmware.vmware_rest.vcenter_datacenter_info:
+      register: datacenter_info
+
+    - name: Gather datastore info
+      vmware.vmware_rest.vcenter_datastore_info:
+      register: datastore_info
+
+    - name: Retrieve network info
+      vmware.vmware_rest.vcenter_network_info:
+      register: network_info
+
+    - name: Build a list of all the folders
+      vmware.vmware_rest.vcenter_folder_info:
+        filter_names:
+          - "templates"
+      register: folder_info
+
+    - name: Retrieve VM id
+      vmware.vmware_rest.vcenter_vm_info:
+        filter_names:
+          - "{{ vmware_os_template }}"
+      register: template_vm_id
+
+    - name: debug
+      debug:
+        msg:
+#          - "datacenter_info: {{ datacenter_info }}"
+#          - "datastore_info: {{ datastore_info }}"
+#          - "network_info: {{ network_info }}"
+          - "folder_info:"
+          - "{{ folder_info }}"
+          - "template_vm_id:"
+          - "{{ template_vm_id.value }}"
+
+    - name: Create vCenter VM
+      vmware.vmware_rest.vcenter_vm:
+        state: clone
+        source: "{{ template_vm_id.value[0].vm }}" 
+        name: "{{ vmware_name }}"
+        nics:
+          - backing:
+            type: STANDARD_PORTGROUP
+            network: "{{ network_info.value[0].network }}"
+        placement: 
+          folder: "{{ folder_info.value[0].folder }}"
+          datastore: "{{  datastore_info.value[0].datastore  }}"
+      register: vm_output
+    
+    - name: Retrieve VM id
+      vmware.vmware_rest.vcenter_vm_info:
+        filter_names:
+          - "{{ vmware_name }}"
+      register: new_vm_id
+      until: new_vm_id.value | length > 0
+      retries: 9
+    
+    - name: Turn VM off if it's on
+      vmware.vmware_rest.vcenter_vm_power:
+        state: stop
+        vm: "{{ new_vm_id.value[0].vm }}"
+      when: 
+        - new_vm_id.value[0].power_state is defined
+        - new_vm_id.value[0].power_state == "POWERED_ON"
+    
+    - name: Set CPU hardware
+      vmware.vmware_rest.vcenter_vm_hardware_cpu:
+        vm: "{{ new_vm_id.value[0].vm }}"
+        count: 5
+        hot_add_enabled: true
+        cores_per_socket: 1
+    
+    - name: Set memory hardware 
+      vmware.vmware_rest.vcenter_vm_hardware_memory:
+        vm: "{{ new_vm_id.value[0].vm }}"
+        size_MiB: 8124
+        hot_add_enabled: true
+    
+    - name: customize newly created VM (linux)
+      vmware.vmware_rest.vcenter_vm_guest_customization:
+        vm: "{{ new_vm_id.value[0].vm }}"
+        configuration_spec:
+          linux_config:
+            domain: "{{ vmware_domain }}"
+            hostname:
+              fixed_name: "{{ vmware_name }}"
+              type: FIXED
+        interfaces:
+        - adapter:
+            ipv4:
+              type: DHCP
+              gateways:
+              ip_address: 
+              prefix:
+        global_DNS_settings:
+          dns_suffix_list: []
+          dns_servers:
+          - "172.16.0.1"
+      when: not windows | bool
+    
+    - name: customize newly created VM (windows)
+      retries: 9
+      delay: 4
+      register: result
+      until: result.failed == false
+      vmware.vmware_rest.vcenter_vm_guest_customization:
+        vm: "{{ new_vm_id.value[0].vm }}"
+        configuration_spec:
+          windows_config:
+            reboot: "REBOOT"
+            sysprep:
+              domain:
+                type: "domain"
+              gui_run_once_commands:
+                - "netsh advfirewall set allprofiles state off"
+              gui_unattended:
+                auto_logon: true
+                auto_logon_count: 1
+                password: "{{ lookup('env', 'WIN_PASSWORD') }}"
+                time_zone: 10 # MST
+              user_data:
+                computer_name:
+                  fixed_name: "{{ vmware_name }}"
+                  type: "FIXED"
+                full_name: "{{ lookup('env', 'WIN_USERNAME') }}"
+                organization: "{{ lookup('env', 'WIN_USERNAME') }}"
+                product_key: "{{ lookup('env', 'WIN_KEY') }}"
+        interfaces:
+        - adapter:
+            ipv4:
+              type: DHCP
+              gateways:
+              ip_address: 
+              prefix:
+        global_DNS_settings:
+          dns_suffix_list: []
+          dns_servers:
+          - "{{ vmware_dns_servers }}"
+      when: windows | bool
+    
+    - name: wait for VM to finish customizing
+      vmware.vmware_rest.vcenter_vm_power_info:
+        vm: "{{ new_vm_id.value[0].vm }}"
+      register: vm_power_info
+    
+    - name: Turn VM on
+      vmware.vmware_rest.vcenter_vm_power:
+        state: start
+        vm: "{{ new_vm_id.value[0].vm }}"
+    
+    - name: wait for power to be on
+      vmware.vmware_rest.vcenter_vm_power_info:
+        vm: "{{ new_vm_id.value[0].vm }}"
+      register: vm_power_info
+    
+    - name: Retrieve VM info
+      vmware.vmware_rest.vcenter_vm_info:
+        vm: "{{ new_vm_id.value[0].vm }}"
+      register: new_vm_output
+    
+    - name: Set stats for output and variables we affect
+      ansible.builtin.set_stats:
+        data:
+          vmware_inst: "{{ new_vm_output.value.identity }}"
+          vm_to_post_provision: "{{ vmware_name }}"
+          vmware_name: "{{ vmware_name }}"
+          expose_to_cloud_redhat_com_vfqdn: "{{ vmware_name }}.{{ vmware_domain }}"

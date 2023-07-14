@@ -1,0 +1,59 @@
+---
+- name: power off newly created template
+  hosts: localhost
+  connection: local
+  vars:
+    vmware_name: "{{ vm_to_post_provision }}"
+    vmware_domain: "lab.cheeseburgia.com"
+    windows: false
+  gather_facts: false
+  tasks:
+    - name: Gather cluster info
+      vmware.vmware_rest.vcenter_datacenter_info:
+      register: datacenter_info
+
+    - name: Gather datastore info
+      vmware.vmware_rest.vcenter_datastore_info:
+      register: datastore_info
+
+    - name: Retrieve network info
+      vmware.vmware_rest.vcenter_network_info:
+      register: network_info
+
+    - name: Build a list of all the folders
+      vmware.vmware_rest.vcenter_folder_info:
+        filter_names:
+          - "templates"
+      register: folder_info
+
+    - name: Retrieve VM id
+      vmware.vmware_rest.vcenter_vm_info:
+      register: template_vm_id
+
+    - name: debug
+      debug:
+        msg:
+#          - "datacenter_info: {{ datacenter_info }}"
+#          - "datastore_info: {{ datastore_info }}"
+#          - "network_info: {{ network_info }}"
+          - "folder_info:"
+          - "{{ folder_info }}"
+          - "template_vm_id:"
+          - "{{ template_vm_id.value }}"
+
+    - name: Retrieve VM id
+      vmware.vmware_rest.vcenter_vm_info:
+        filter_names:
+          - "{{ vmware_name }}"
+      register: new_vm_id
+      until: new_vm_id.value | length > 0
+      retries: 9
+    
+    - name: Turn VM off if it's on
+      vmware.vmware_rest.vcenter_vm_power:
+        state: stop
+        vm: "{{ new_vm_id.value[0].vm }}"
+      when: 
+        - new_vm_id.value[0].power_state is defined
+        - new_vm_id.value[0].power_state == "POWERED_ON"
+    

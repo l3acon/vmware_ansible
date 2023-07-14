@@ -1,0 +1,26 @@
+---
+- name: Gather cluster info
+  vmware.vmware_rest.vcenter_datacenter_info:
+  register: datacenter_info
+
+- name: Gather datastore info
+  vmware.vmware_rest.vcenter_datastore_info:
+  register: datastore_info
+
+- name: Retrieve network info
+  vmware.vmware_rest.vcenter_network_info:
+  register: network_info
+
+- name: Build a list of all the folders
+  vmware.vmware_rest.vcenter_folder_info:
+    filter_names:
+      - "vms"
+  register: folder_info
+
+- name: Provision VM
+  include_tasks: build.yml
+  when: not destroy | bool
+
+- name: Destroy VM
+  include_tasks: destroy.yml
+  when: destroy | bool

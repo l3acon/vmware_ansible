@@ -1,0 +1,37 @@
+---
+- name: Provision VM in VMware vCenter
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    vmware_domain: "lab.cheeseburgia.com"
+    vmware_esxi_host: "esxi.lab.cheeseburgia.com"
+    vmware_folder: "vms"
+    vmware_dns_servers: "172.16.0.1"
+    vmware_name: "set-in-defaults"
+    vmware_os_template: "ostemplate-rhel8server-2021.06.01"
+    vmware_hardware:
+      "lc1.small":
+        memory_mb: "2048"
+        num_cpus: "2"
+      "lc1.medium":
+        memory_mb: "4096"
+        num_cpus: "4"
+      "lc1.large":
+        memory_mb: "8192"
+        num_cpus: "8"
+      "lc1.xlarge":
+        memory_mb: "16384"
+        num_cpus: "16"
+  tasks:
+    - name: Include vmware
+      vars:
+        destroy: false
+        windows: false
+      include_role:
+        name: vmware
+
+    - name: export name of VM
+      set_stats:
+        data:
+          vm_to_post_provision: "{{ vmware_name }}"

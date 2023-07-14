@@ -1,0 +1,22 @@
+---
+vm_state: "poweredon"
+vmware_domain: "some.domain.com"
+vmware_esxi_host: "some.domain.com"
+vmware_folder: "somefolder"
+vmware_dns_servers: "192.168.0.1"
+vmware_name: "some_default_name"
+vmware_os_template: "some-os-template"
+vmware_hardware: 
+  "lc1.small":
+    memory_mb: "2048"
+    num_cpus: "2"
+  "lc1.medium":
+    memory_mb: "4096"
+    num_cpus: "4"
+  "lc1.large":
+    memory_mb: "8192"
+    num_cpus: "8"
+  "lc1.xlarge":
+    memory_mb: "16384"
+    num_cpus: "16"
+

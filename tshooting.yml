@@ -1,0 +1,156 @@
+---
+- name: gather info
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Gather cluster info
+      vmware.vmware_rest.vcenter_datacenter_info:
+      register: datacenter_info
+
+    - name: Show datacenter_info
+      ansible.builtin.debug:
+        msg: "{{ datacenter_info }}"
+
+    - name: Gather datastore info
+      vmware.vmware_rest.vcenter_datastore_info:
+      register: datastore_info
+
+    - name: Show datastore_info
+      ansible.builtin.debug:
+        msg: "{{ datastore_info }}"
+
+    - name: Retrieve network info
+      vmware.vmware_rest.vcenter_network_info:
+      register: network_info
+
+    - name: Show network info
+      ansible.builtin.debug:
+        msg: "{{ network_info }}"
+
+    - name: Build a list of all the folders
+      vmware.vmware_rest.vcenter_folder_info:
+        filter_names:
+          - "vms"
+      register: folder_info
+
+    - name: Show folders
+      ansible.builtin.debug:
+        msg: "{{ folder_info }}"
+
+    - name: Retrieve VM id
+      vmware.vmware_rest.vcenter_vm_info:
+#        filter_names:
+#          - "ostemplate-win10-2022.04.25"
+      register: template_vm_id
+
+    - name: Show vms templates
+      ansible.builtin.debug:
+        msg: "{{ template_vm_id }}"
+
+    - name: get content config
+      vmware.vmware_rest.content_locallibrary_info:
+      register: content_config
+      retries: 100
+      delay: 3
+      until: content_config is not failed
+
+    - name: Show content config
+      ansible.builtin.debug:
+        msg: "{{ content_config }}"
+
+    - name: Show content config
+      vmware.vmware_rest.content_library_item_info:
+        library_id: "{{ content_config.value[0].id }}"
+      register: my_library
+
+    - name: Show library info
+      ansible.builtin.debug:
+        msg: "{{ my_library }}"
+
+#    - name: create vm
+#      vmware.vmware_rest.vcenter_vm:
+#        state: clone
+#        source: "{{ template_vm_id.value[0].vm }}" 
+#        name: "test123"
+#        nics:
+#          - backing:
+#            type: STANDARD_PORTGROUP
+#            network: "{{ network_info.value[0].network }}"
+#        placement: 
+#          folder: "{{ folder_info.value[0].folder }}"
+#          datastore: "{{  datastore_info.value[0].datastore  }}"
+#      register: create_vm_output
+#
+#    - name: Retrieve VM id
+#      vmware.vmware_rest.vcenter_vm_info:
+#        filter_names:
+#          - "test123"
+#      register: new_vm_id
+#
+#    - name: Retrieve VM info
+#      vmware.vmware_rest.vcenter_vm_info:
+#        vm: "{{ new_vm_id.value[0].vm }}"
+#      register: new_vm_info
+#
+#    - name: Show created VM info
+#      ansible.builtin.debug:
+#        msg: "{{ new_vm_info }}"
+#
+#    - name: Set CPU 
+#      vmware.vmware_rest.vcenter_vm_hardware_cpu:
+#        vm: "{{ new_vm_id.value[0].vm }}"
+#        hot_add_enabled: true
+#        cores_per_socket: 1
+#        count: 5
+#
+#    - name: Set CPU 
+#      vmware.vmware_rest.vcenter_vm_hardware_memory:
+#        vm: "{{ new_vm_id.value[0].vm }}"
+#        size_MiB: 8124
+#        hot_add_enabled: true
+#
+##    - name: customize newly created VM
+##      vmware.vmware_rest.vcenter_vm_guest_customization:
+##        vm: "{{ new_vm_id.value[0].vm }}"
+##        configuration_spec:
+##          linux_config:
+##            domain: "lab.cheeseburgia.com"
+##            hostname:
+##              fixed_name: "test123"
+##              type: FIXED
+##        interfaces:
+##        - adapter:
+##            ipv4:
+##              type: DHCP
+##              gateways:
+##              ip_address: 
+##              prefix:
+##        global_DNS_settings:
+##          dns_suffix_list: []
+##          dns_servers:
+##          - "172.16.0.1"
+##
+#    - name: Start VM
+#      vmware.vmware_rest.vcenter_vm_power:
+#        state: start
+#        vm: "{{ new_vm_id.value[0].vm }}"
+#
+#    - name: wait for power to be on
+#      vmware.vmware_rest.vcenter_vm_power_info:
+#        vm: "{{ new_vm_id.value[0].vm }}"
+#      register: vm_power_info
+#
+#    - name: Show VM power
+#      ansible.builtin.debug:
+#        msg: "{{ vm_power_info }}"
+#
+#    - name: Retrieve VM info
+#      vmware.vmware_rest.vcenter_vm_info:
+#        vm: "{{ new_vm_id.value[0].vm }}"
+#      register: new_vm_info
+#
+#    - name: Show created VM info
+#      ansible.builtin.debug:
+#        msg: "{{ new_vm_info }}"
+#
+#
